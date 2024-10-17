@@ -1,13 +1,85 @@
+from collections import OrderedDict
+
 from django.forms import model_to_dict
 from django.http import JsonResponse
-from products.models import Product
+from products.models import Product, Category, Tag
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from products.serializers import ProductSerializer, ProductValidateSerializer
+from products.serializers import (ProductSerializer,
+                                  ProductValidateSerializer,
+                                  CategorySerializer,
+                                  TagSerializer)
 
 from users.permissions import IsSuperUser
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.viewsets import ModelViewSet
+
+
+class TagViewSet(ModelViewSet):
+    queryset = Tag.objects.all()
+    serializer_class = TagSerializer
+    pagination_class = PageNumberPagination
+    lookup_field = 'id'
+
+
+class CustomPagination(PageNumberPagination):
+    def get_paginated_response(self, data):
+        return Response(OrderedDict([
+            ('total', self.page.paginator.count),
+            ('next', self.get_next_link()),
+            ('previous', self.get_previous_link()),
+            ('results', data)
+        ]))
+
+
+class CategoryListAPIView(ListCreateAPIView):
+    queryset = Category.objects.all()  # List objects received from DB
+    serializer_class = CategorySerializer  # Serializer inherited by ModelSerializer
+    pagination_class = CustomPagination
+
+
+class CategoryDetailAPIView(RetrieveUpdateDestroyAPIView):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+
+
+class ProductListCreateAPIView(ListCreateAPIView):
+    queryset = (Product.objects.select_related('category')
+                .prefetch_related('tags', 'reviews').all())
+    serializer_class = ProductSerializer
+
+    def create(self, request, *args, **kwargs):
+        # step 0: Validation of data (Existing, Typing, Extra)
+        serializer = ProductValidateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(status=status.HTTP_400_BAD_REQUEST,
+                            data=serializer.errors)
+
+        # step 1: Receive data from request body
+        title = serializer.validated_data.get('title')  # new title
+        text = serializer.validated_data.get('text')  # None
+        price = serializer.validated_data.get('price')  # 1.1
+        is_active = serializer.validated_data.get('is_active')  # None
+        category_id = serializer.validated_data.get('category_id')
+        tags = serializer.validated_data.get('tags')
+
+        # step 2: Create product by received data
+        product = Product.objects.create(
+            title=title,
+            text=text,
+            price=price,
+            is_active=is_active,
+            category_id=category_id,
+        )
+        product.tags.set(tags)
+        product.save()
+
+        # step 3: Return response with data and status
+        return Response(data={'product_id': product.id},
+                        status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET', 'POST'])
