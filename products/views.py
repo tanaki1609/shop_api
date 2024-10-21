@@ -47,6 +47,7 @@ class CategoryDetailAPIView(RetrieveUpdateDestroyAPIView):
 
 
 class ProductListCreateAPIView(ListCreateAPIView):
+    """ You can create and receive list of product """
     queryset = (Product.objects.select_related('category')
                 .prefetch_related('tags', 'reviews').all())
     serializer_class = ProductSerializer
